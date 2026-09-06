@@ -1,0 +1,11 @@
+{
+  "include": [
+    "src",
+    "learning",
+    "projects",
+    "tests"
+  ],
+  "extraPaths": [
+    "."
+  ]
+}
