@@ -16,9 +16,32 @@ class TaskGenerator:
         Validates paths and writes file content to disk.
         Returns a list of created absolute Path objects.
         """
-        files = task_data.get("files", [])
+        files = list(task_data.get("files", []))
         if not files:
             raise ValueError("Task data contains no files to write.")
+
+        # If detailed explanation exists and no markdown file is in files, generate study notes doc
+        has_doc = any(f.get("path", "").endswith(".md") for f in files)
+        explanation = task_data.get("explanation")
+        if not has_doc and explanation:
+            import re
+            category = task_data.get("category", "python")
+            title = task_data.get("title", "Daily Practice")
+            desc = task_data.get("description", "")
+            objectives = task_data.get("learning_objectives", [])
+
+            day_num = None
+            for f in files:
+                m = re.search(r"day_(\d+)", f.get("path", ""))
+                if m:
+                    day_num = int(m.group(1))
+                    break
+
+            day_prefix = f"day_{day_num:03d}" if day_num is not None else "daily"
+            notes_path = f"learning/{category}/{day_prefix}_notes.md"
+            obj_list = "\n".join(f"- {o}" for o in objectives) if objectives else "- Core conceptual mastery"
+            notes_content = f"# {title}\n\n## Overview\n{desc}\n\n## Objectives\n{obj_list}\n\n## Key Concepts\n{explanation}\n"
+            files.append({"path": notes_path, "content": notes_content})
 
         written_paths = []
 

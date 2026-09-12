@@ -54,6 +54,17 @@ class RoadmapManager:
         progress = self.load_progress()
         return day in progress.get("completed_days", [])
 
+    def get_next_uncompleted_day(self) -> Optional[int]:
+        """Finds the lowest numbered day in the roadmap that has not been marked completed."""
+        progress = self.load_progress()
+        completed = set(progress.get("completed_days", []))
+        roadmap = self.load_roadmap()
+        for item in roadmap:
+            day = item.get("day")
+            if day and day not in completed:
+                return day
+        return None
+
     def mark_day_completed(self, day: int, category: str) -> None:
         """Updates progress.json recording completed day."""
         progress = self.load_progress()

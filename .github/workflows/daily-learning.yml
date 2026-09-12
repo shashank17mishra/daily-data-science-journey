@@ -53,6 +53,8 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: ${{ vars.GEMINI_MODEL || 'gemini-2.5-flash' }}
           START_DATE: ${{ vars.START_DATE || '2026-09-07' }}
+          GIT_AUTHOR_NAME: ${{ vars.GIT_AUTHOR_NAME || 'shashank mishra' }}
+          GIT_AUTHOR_EMAIL: ${{ vars.GIT_AUTHOR_EMAIL || 'shashank17oct2003@gmail.com' }}
         run: |
           FLAGS=""
           if [ "${{ inputs.dry_run }}" = "true" ]; then

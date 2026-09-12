@@ -27,8 +27,19 @@ def run_daily_automation(
     # Determine day number
     if force_day:
         current_day = force_day
-    else:
+    elif custom_date:
         current_day = get_current_day(target_date_str=custom_date)
+    else:
+        sched_day = get_current_day()
+        if roadmap_mgr.is_day_completed(sched_day):
+            next_day = roadmap_mgr.get_next_uncompleted_day()
+            if next_day:
+                logger.info(f"Scheduled day (Day {sched_day}) is already completed. Automatically advancing to next uncompleted day: Day {next_day}")
+                current_day = next_day
+            else:
+                current_day = sched_day
+        else:
+            current_day = sched_day
 
     logger.info(f"Target Learning Day: Day {current_day}")
 
@@ -101,9 +112,13 @@ def run_daily_automation(
         return 1
 
     try:
-        git_auto.stage_files(written_paths)
-        commit_msg = task_data.get("commit_message", f"day-{current_day:03d}: practice {topic}")
-        git_auto.commit(commit_msg)
+        commits_count = git_auto.create_daily_commits(
+            day=current_day,
+            topic=topic,
+            category=category,
+            written_paths=written_paths
+        )
+        logger.info(f"Successfully created {commits_count} commits for Day {current_day}.")
         git_auto.push()
     except Exception as e:
         logger.error(f"Git automation failed: {e}")

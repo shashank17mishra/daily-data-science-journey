@@ -38,3 +38,20 @@ def test_roadmap_progress_tracking(tmp_path):
 
     mgr.mark_day_completed(1, "python")
     assert mgr.is_day_completed(1)
+
+def test_roadmap_get_next_uncompleted_day(tmp_path):
+    roadmap_file = tmp_path / "roadmap.json"
+    progress_file = tmp_path / "progress.json"
+
+    with open(roadmap_file, "w") as f:
+        json.dump([
+            {"day": 1, "category": "python"},
+            {"day": 2, "category": "python"},
+            {"day": 3, "category": "python"}
+        ], f)
+
+    with open(progress_file, "w") as f:
+        json.dump({"completed_days": [1, 2]}, f)
+
+    mgr = RoadmapManager(roadmap_path=roadmap_file, progress_path=progress_file)
+    assert mgr.get_next_uncompleted_day() == 3
