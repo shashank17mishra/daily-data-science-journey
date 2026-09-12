@@ -51,7 +51,7 @@ jobs:
       - name: Run Daily Data Science Automation
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GEMINI_MODEL: ${{ vars.GEMINI_MODEL || 'gemini-2.0-flash' }}
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL || 'gemini-3.6-flash' }}
           START_DATE: ${{ vars.START_DATE || '2026-09-07' }}
           GIT_AUTHOR_NAME: ${{ vars.GIT_AUTHOR_NAME || 'shashank mishra' }}
           GIT_AUTHOR_EMAIL: ${{ vars.GIT_AUTHOR_EMAIL || 'shashank17oct2003@gmail.com' }}

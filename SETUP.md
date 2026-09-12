@@ -76,7 +76,7 @@ To enable automated daily execution in GitHub Actions:
 ### Optional Variables (Configuration)
 Under **Variables** (or as env vars):
 - `START_DATE`: `2026-09-07` (The day Day 1 begins in IST)
-- `GEMINI_MODEL`: `gemini-2.5-flash` (or `gemini-1.5-flash`)
+- `GEMINI_MODEL`: `gemini-3.6-flash` (or `gemini-3.5-flash-lite`)
 
 ---
 

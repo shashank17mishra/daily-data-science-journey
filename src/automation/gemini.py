@@ -3,8 +3,8 @@ import json
 from typing import Dict, Any, Optional
 from src.automation.utils import logger
 
-DEFAULT_MODEL = "gemini-2.0-flash"
-FALLBACK_MODELS = ["gemini-1.5-flash", "gemini-2.0-flash-lite"]
+DEFAULT_MODEL = "gemini-3.6-flash"
+FALLBACK_MODELS = ["gemini-3.5-flash-lite", "gemini-3.5-flash", "gemini-2.5-flash"]
 
 SYSTEM_PROMPT = """
 You are an expert Data Science, AI/ML, and DevOps educator.
