@@ -3,7 +3,8 @@ import json
 from typing import Dict, Any, Optional
 from src.automation.utils import logger
 
-DEFAULT_MODEL = "gemini-2.5-flash"
+DEFAULT_MODEL = "gemini-2.0-flash"
+FALLBACK_MODELS = ["gemini-1.5-flash", "gemini-2.0-flash-lite"]
 
 SYSTEM_PROMPT = """
 You are an expert Data Science, AI/ML, and DevOps educator.
@@ -88,15 +89,27 @@ Ensure file paths follow the repository convention: `learning/{category}/day_{da
         temperature=0.2,
     )
 
-    try:
-        response = client.models.generate_content(
-            model=model_name,
-            contents=user_prompt,
-            config=config
-        )
-    except Exception as e:
-        logger.error(f"Gemini API request failed: {e}")
-        raise RuntimeError(f"Gemini API call failed: {e}")
+    models_to_try = [model_name] + [m for m in FALLBACK_MODELS if m != model_name]
+    response = None
+    last_err = None
+
+    for m in models_to_try:
+        try:
+            logger.info(f"Generating content with model '{m}' for Day {day} ({topic})...")
+            response = client.models.generate_content(
+                model=m,
+                contents=user_prompt,
+                config=config
+            )
+            if response and response.text:
+                logger.info(f"Successfully received response from model '{m}'.")
+                break
+        except Exception as e:
+            logger.warning(f"Model '{m}' call failed: {e}. Trying fallback...")
+            last_err = e
+
+    if not response or not response.text:
+        raise RuntimeError(f"Gemini generation failed across models ({models_to_try}): {last_err}")
 
     raw_text = response.text
     if not raw_text:
