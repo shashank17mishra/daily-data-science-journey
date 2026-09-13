@@ -60,3 +60,73 @@ def test_git_create_daily_commits_orchestration(tmp_path):
     assert "test(day-015)" in staged_calls[1][1]
     assert "docs(day-015)" in staged_calls[2][1]
     assert "chore(day-015)" in staged_calls[3][1]
+
+
+def test_git_push_local_skips(monkeypatch):
+    git_auto = GitAutomation()
+    executed_cmds = []
+    git_auto._run = lambda cmd: executed_cmds.append(cmd)
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+
+    git_auto.push()
+    assert len(executed_cmds) == 0
+
+
+def test_git_push_ci_success(monkeypatch):
+    git_auto = GitAutomation()
+    executed_cmds = []
+    git_auto._run = lambda cmd: executed_cmds.append(cmd)
+
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("GITHUB_REF_NAME", "main")
+
+    git_auto.push()
+    assert ["git", "fetch", "origin", "main"] in executed_cmds
+    assert ["git", "rebase", "origin/main"] in executed_cmds
+    assert ["git", "push", "origin", "HEAD:main"] in executed_cmds
+
+
+def test_git_push_ci_retry_on_failure(monkeypatch):
+    git_auto = GitAutomation()
+    executed_cmds = []
+    attempts = 0
+
+    def mock_run(cmd):
+        nonlocal attempts
+        executed_cmds.append(cmd)
+        if cmd == ["git", "push", "origin", "HEAD:main"] and attempts == 0:
+            attempts += 1
+            raise RuntimeError("push rejected (fetch first)")
+        return ""
+
+    git_auto._run = mock_run
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("GITHUB_REF_NAME", "main")
+    monkeypatch.setattr("time.sleep", lambda s: None)
+
+    git_auto.push(max_retries=2)
+    assert attempts == 1
+    assert ["git", "rebase", "--abort"] in executed_cmds
+    assert executed_cmds.count(["git", "push", "origin", "HEAD:main"]) == 2
+
+
+def test_git_push_ci_aborts_and_raises_after_max_retries(monkeypatch):
+    git_auto = GitAutomation()
+    executed_cmds = []
+
+    def mock_run(cmd):
+        executed_cmds.append(cmd)
+        if "push" in cmd:
+            raise RuntimeError("push failed")
+        return ""
+
+    git_auto._run = mock_run
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("GITHUB_REF_NAME", "main")
+    monkeypatch.setattr("time.sleep", lambda s: None)
+
+    with pytest.raises(RuntimeError, match="Git push failed after 2 attempts"):
+        git_auto.push(max_retries=2)
+
+    assert ["git", "rebase", "--abort"] in executed_cmds
+

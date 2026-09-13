@@ -1,7 +1,8 @@
 import os
 import subprocess
+import time
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 from src.automation.utils import get_repo_root, logger
 
 class GitAutomation:
@@ -178,15 +179,48 @@ class GitAutomation:
 
         return created_count
 
-    def push(self) -> None:
+    def push(self, branch: Optional[str] = None, max_retries: int = 3) -> None:
         """
         Pushes changes to remote origin ONLY when inside GitHub Actions workflow.
+        Includes automatic fetch + rebase to gracefully handle concurrent remote updates.
         """
         is_ci = os.getenv("GITHUB_ACTIONS") == "true"
         if not is_ci:
             logger.info("Local environment detected. Skipping git push.")
             return
 
-        logger.info("GitHub Actions CI environment detected. Pushing commit to remote repository...")
-        self._run(["git", "push", "origin", "HEAD"])
-        logger.info("Git push completed successfully.")
+        if not branch:
+            ref_name = os.getenv("GITHUB_REF_NAME")
+            if ref_name and not ref_name.startswith("refs/"):
+                branch = ref_name
+            else:
+                raw_ref = os.getenv("GITHUB_REF", "refs/heads/main")
+                branch = raw_ref.replace("refs/heads/", "") if "refs/heads/" in raw_ref else "main"
+
+        logger.info(f"GitHub Actions CI environment detected. Pushing commit to remote repository branch '{branch}'...")
+
+        last_err = None
+        for attempt in range(1, max_retries + 1):
+            try:
+                # 1. Fetch remote changes to integrate any concurrent commits
+                self._run(["git", "fetch", "origin", branch])
+                # 2. Rebase local commits on top of origin/<branch>
+                self._run(["git", "rebase", f"origin/{branch}"])
+                # 3. Push local HEAD to origin/<branch>
+                self._run(["git", "push", "origin", f"HEAD:{branch}"])
+                logger.info(f"Git push to '{branch}' completed successfully.")
+                return
+            except Exception as e:
+                last_err = e
+                logger.warning(f"Git push attempt {attempt}/{max_retries} failed: {e}")
+                # Abort any in-progress rebase so the working tree stays clean
+                try:
+                    self._run(["git", "rebase", "--abort"])
+                except Exception:
+                    pass
+
+                if attempt < max_retries:
+                    time.sleep(2 * attempt)
+
+        raise RuntimeError(f"Git push failed after {max_retries} attempts: {last_err}")
+
