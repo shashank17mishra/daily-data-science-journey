@@ -1,6 +1,8 @@
 import os
 import json
-from typing import Dict, Any, Optional
+import re
+from typing import Dict, Any, Optional, List
+from pydantic import BaseModel, Field
 from src.automation.utils import logger
 
 DEFAULT_MODEL = "gemini-3.6-flash"
@@ -38,6 +40,94 @@ REQUIREMENTS:
 4. Keep dependencies minimal and use standard library or common packages (numpy, pandas, scikit-learn, pytest) where standard.
 5. All file paths must be relative to repository root.
 """
+
+
+class TaskFile(BaseModel):
+    path: str = Field(description="Relative path of file to create or update")
+    content: str = Field(description="Full text content of the file")
+
+
+class TaskPayload(BaseModel):
+    title: str = Field(description="Day title, e.g. Day 016: Dataclasses & Structured Data")
+    category: str = Field(description="Category name, e.g. python")
+    description: str = Field(description="Detailed explanation of the exercise")
+    learning_objectives: List[str] = Field(description="List of learning goals")
+    files: List[TaskFile] = Field(description="List of files to generate")
+    explanation: str = Field(description="Study notes and concept overview")
+    commit_message: str = Field(description="Git commit message")
+
+
+def extract_json_str(raw_text: str) -> str:
+    """Extracts JSON substring from raw model response, handling markdown blocks and preambles."""
+    text = raw_text.strip()
+
+    # Match ```json ... ``` or ``` ... ```
+    match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", text)
+    if match:
+        candidate = match.group(1).strip()
+        first_brace = candidate.find("{")
+        last_brace = candidate.rfind("}")
+        if first_brace != -1 and last_brace > first_brace:
+            return candidate[first_brace : last_brace + 1].strip()
+
+    # Find outermost braces { ... }
+    first_brace = text.find("{")
+    last_brace = text.rfind("}")
+    if first_brace != -1 and last_brace > first_brace:
+        return text[first_brace : last_brace + 1].strip()
+
+    return text
+
+
+def parse_gemini_json(raw_text: str) -> Dict[str, Any]:
+    """
+    Robustly parses JSON from Gemini model responses.
+    Handles unescaped control characters (newlines, tabs in code strings),
+    markdown code blocks, invalid backslash escapes, and trailing commas.
+    """
+    if not raw_text or not raw_text.strip():
+        raise ValueError("Gemini returned an empty response.")
+
+    json_str = extract_json_str(raw_text)
+
+    # 1. Standard loads with strict=False (allows raw newlines/tabs inside strings)
+    try:
+        data = json.loads(json_str, strict=False)
+        if isinstance(data, dict):
+            return data
+    except json.JSONDecodeError:
+        pass
+
+    # 2. Fix invalid backslash escapes (e.g. \d, \s in python code strings)
+    cleaned = re.sub(r'\\(?![/"\\bfnrtu]|u[0-9a-fA-F]{4})', r'\\\\', json_str)
+    try:
+        data = json.loads(cleaned, strict=False)
+        if isinstance(data, dict):
+            return data
+    except json.JSONDecodeError:
+        pass
+
+    # 3. Remove trailing commas in objects and arrays
+    cleaned_no_commas = re.sub(r',\s*([}\]])', r'\1', cleaned)
+    try:
+        data = json.loads(cleaned_no_commas, strict=False)
+        if isinstance(data, dict):
+            return data
+    except json.JSONDecodeError:
+        pass
+
+    # 4. Strip non-printable control characters outside standard whitespace
+    cleaned_ctrl = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', cleaned_no_commas)
+    try:
+        data = json.loads(cleaned_ctrl, strict=False)
+        if isinstance(data, dict):
+            return data
+    except json.JSONDecodeError as e:
+        logger.error(f"Failed to parse Gemini response as JSON: {e}\nResponse snippet: {raw_text[:300]}")
+        raise ValueError(f"Invalid JSON response from Gemini model: {e}")
+
+    raise ValueError("Gemini response parsed to non-dictionary JSON.")
+
 
 def generate_daily_task(
     day: int,
@@ -86,6 +176,8 @@ Ensure file paths follow the repository convention: `learning/{category}/day_{da
     config = types.GenerateContentConfig(
         system_instruction=SYSTEM_PROMPT,
         response_mime_type="application/json",
+        response_schema=TaskPayload,
+        automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
         temperature=0.2,
     )
 
@@ -105,30 +197,29 @@ Ensure file paths follow the repository convention: `learning/{category}/day_{da
                 logger.info(f"Successfully received response from model '{m}'.")
                 break
         except Exception as e:
-            logger.warning(f"Model '{m}' call failed: {e}. Trying fallback...")
-            last_err = e
+            logger.warning(f"Model '{m}' call with structured schema failed: {e}. Trying without response_schema...")
+            try:
+                fallback_config = types.GenerateContentConfig(
+                    system_instruction=SYSTEM_PROMPT,
+                    response_mime_type="application/json",
+                    automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+                    temperature=0.2,
+                )
+                response = client.models.generate_content(
+                    model=m,
+                    contents=user_prompt,
+                    config=fallback_config
+                )
+                if response and response.text:
+                    logger.info(f"Successfully received response from model '{m}' (unstructured mode).")
+                    break
+            except Exception as e2:
+                logger.warning(f"Model '{m}' call failed: {e2}. Trying fallback...")
+                last_err = e2
 
     if not response or not response.text:
         raise RuntimeError(f"Gemini generation failed across models ({models_to_try}): {last_err}")
 
     raw_text = response.text
-    if not raw_text:
-        raise ValueError("Gemini returned an empty response.")
+    return parse_gemini_json(raw_text)
 
-    # Parse JSON output
-    cleaned_text = raw_text.strip()
-    if cleaned_text.startswith("```json"):
-        cleaned_text = cleaned_text[7:]
-    if cleaned_text.startswith("```"):
-        cleaned_text = cleaned_text[3:]
-    if cleaned_text.endswith("```"):
-        cleaned_text = cleaned_text[:-3]
-    cleaned_text = cleaned_text.strip()
-
-    try:
-        task_data = json.loads(cleaned_text)
-    except json.JSONDecodeError as e:
-        logger.error(f"Failed to parse Gemini response as JSON: {e}")
-        raise ValueError(f"Invalid JSON response from Gemini model: {e}")
-
-    return task_data
