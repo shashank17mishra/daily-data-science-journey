@@ -66,36 +66,45 @@ def run_daily_automation(
 
     logger.info(f"Roadmap Spec: [{category}] {topic} (Difficulty: {difficulty})")
 
-    # Generate task content using Gemini (or fallback if mock/offline test)
-    try:
-        task_data = generate_daily_task(
-            day=current_day,
-            category=category,
-            topic=topic,
-            difficulty=difficulty,
-            learning_objectives=objectives,
-            expected_output=expected_output
-        )
-    except Exception as e:
-        logger.error(f"Daily task generation failed: {e}")
-        return 1
-
-    # Write generated files
+    # Generate, write, and validate task content with self-healing retry loop
+    MAX_ATTEMPTS = 3
     generator = TaskGenerator()
-    try:
-        written_paths = generator.write_task_files(task_data)
-    except Exception as e:
-        logger.error(f"Writing task files failed: {e}")
-        return 1
-
-    # Validate output, syntax, tests, security
     validator = TaskValidator()
-    try:
-        validator.validate_all(task_data, written_paths)
-    except Exception as e:
-        logger.error(f"Task validation failed: {e}")
-        logger.error("Aborting git commit due to validation failure.")
-        return 1
+    task_data = None
+    written_paths = []
+    validation_error = None
+
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        if written_paths:
+            logger.info(f"Rolling back and cleaning up files from previous failed attempt {attempt - 1}...")
+            generator.cleanup_files(written_paths)
+            written_paths = []
+
+        logger.info(f"Task generation & validation attempt {attempt}/{MAX_ATTEMPTS} for Day {current_day}...")
+        try:
+            task_data = generate_daily_task(
+                day=current_day,
+                category=category,
+                topic=topic,
+                difficulty=difficulty,
+                learning_objectives=objectives,
+                expected_output=expected_output,
+                feedback=validation_error if attempt > 1 else None
+            )
+            written_paths = generator.write_task_files(task_data)
+            validator.validate_all(task_data, written_paths)
+            validation_error = None
+            logger.info(f"Attempt {attempt} passed all validations successfully!")
+            break
+        except Exception as e:
+            validation_error = str(e)
+            logger.warning(f"Attempt {attempt} failed: {validation_error}")
+            if attempt == MAX_ATTEMPTS:
+                logger.error(f"All {MAX_ATTEMPTS} generation/validation attempts failed for Day {current_day}.")
+                if written_paths:
+                    generator.cleanup_files(written_paths)
+                logger.error("Aborting git commit due to validation failure.")
+                return 1
 
     # Update progress state
     if not dry_run:

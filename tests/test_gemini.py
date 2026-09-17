@@ -4,6 +4,7 @@ from src.automation.gemini import (
     extract_json_str,
     parse_gemini_json,
     generate_daily_task,
+    is_transient_error,
     TaskPayload
 )
 
@@ -90,3 +91,59 @@ def test_generate_daily_task_mocked_success():
         assert result["title"] == "Day 016: Dataclasses"
         assert "@dataclass" in result["files"][0]["content"]
         assert mock_client.models.generate_content.called
+
+def test_is_transient_error():
+    assert is_transient_error(Exception("503 UNAVAILABLE: High demand"))
+    assert is_transient_error(Exception("429 RESOURCE_EXHAUSTED: Quota exceeded"))
+    assert is_transient_error(Exception("500 Internal Server Error"))
+    assert is_transient_error(Exception("504 Gateway Timeout"))
+    assert not is_transient_error(ValueError("Invalid argument value"))
+
+def test_generate_daily_task_with_feedback():
+    mock_client = MagicMock()
+    mock_response = MagicMock()
+    mock_response.text = '{"title": "Day 020", "category": "python", "description": "Desc", "learning_objectives": [], "files": [{"path": "learning/python/day_020.py", "content": "print(1)"}], "explanation": "Notes", "commit_message": "day-020: fix"}'
+    mock_client.models.generate_content.return_value = mock_response
+
+    with patch("google.genai.Client", return_value=mock_client):
+        result = generate_daily_task(
+            day=20,
+            category="python",
+            topic="CSV Parsing",
+            difficulty="Intermediate",
+            learning_objectives=[],
+            expected_output="",
+            api_key="fake-test-key",
+            feedback="Syntax error on line 7"
+        )
+        assert result["title"] == "Day 020"
+        call_args = mock_client.models.generate_content.call_args
+        contents = call_args.kwargs.get("contents", "")
+        assert "CRITICAL FIX REQUIRED" in contents
+        assert "Syntax error on line 7" in contents
+
+def test_generate_daily_task_transient_retry():
+    mock_client = MagicMock()
+    mock_response = MagicMock()
+    mock_response.text = '{"title": "Day 020", "category": "python", "description": "Desc", "learning_objectives": [], "files": [{"path": "learning/python/day_020.py", "content": "print(1)"}], "explanation": "Notes", "commit_message": "day-020: fix"}'
+
+    # First call fails with 503 UNAVAILABLE, second succeeds
+    mock_client.models.generate_content.side_effect = [
+        Exception("503 UNAVAILABLE: High demand"),
+        mock_response
+    ]
+
+    with patch("google.genai.Client", return_value=mock_client), patch("time.sleep") as mock_sleep:
+        result = generate_daily_task(
+            day=20,
+            category="python",
+            topic="CSV Parsing",
+            difficulty="Intermediate",
+            learning_objectives=[],
+            expected_output="",
+            api_key="fake-test-key"
+        )
+        assert result["title"] == "Day 020"
+        assert mock_client.models.generate_content.call_count == 2
+        assert mock_sleep.called
+

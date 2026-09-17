@@ -1,12 +1,18 @@
 import os
 import json
 import re
+import time
 from typing import Dict, Any, Optional, List
 from pydantic import BaseModel, Field
 from src.automation.utils import logger
 
 DEFAULT_MODEL = "gemini-3.6-flash"
-FALLBACK_MODELS = ["gemini-3.5-flash-lite", "gemini-3.5-flash", "gemini-2.5-flash"]
+FALLBACK_MODELS = [
+    "gemini-3.5-flash",
+    "gemini-2.5-flash",
+    "gemini-2.5-pro",
+    "gemini-3.5-flash-lite",
+]
 
 SYSTEM_PROMPT = """
 You are an expert Data Science, AI/ML, and DevOps educator.
@@ -39,6 +45,8 @@ REQUIREMENTS:
 3. NEVER hardcode API keys, credentials, or sensitive data.
 4. Keep dependencies minimal and use standard library or common packages (numpy, pandas, scikit-learn, pytest) where standard.
 5. All file paths must be relative to repository root.
+6. In 'content', output ONLY raw source code. NEVER include markdown code fences (```python or ```) inside the content strings.
+7. Python code must be syntactically valid with correct indentation, closed quotes/brackets, and valid imports.
 """
 
 
@@ -129,6 +137,16 @@ def parse_gemini_json(raw_text: str) -> Dict[str, Any]:
     raise ValueError("Gemini response parsed to non-dictionary JSON.")
 
 
+def is_transient_error(err: Exception) -> bool:
+    """Checks whether an exception indicates a temporary server issue or rate limit."""
+    err_str = str(err).lower()
+    return any(term in err_str for term in [
+        "503", "unavailable", "high demand", "temporarily unavailable",
+        "429", "resource_exhausted", "quota", "rate limit", "500", "internal",
+        "502", "bad gateway", "504", "gateway timeout", "deadline"
+    ])
+
+
 def generate_daily_task(
     day: int,
     category: str,
@@ -137,10 +155,12 @@ def generate_daily_task(
     learning_objectives: list,
     expected_output: str,
     api_key: Optional[str] = None,
-    model_name: Optional[str] = None
+    model_name: Optional[str] = None,
+    feedback: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Calls Google Gemini API using the official google-genai SDK to generate structured task files.
+    Includes exponential backoff for transient errors, fallback model cascade, and error feedback injection.
     """
     if not api_key:
         api_key = os.getenv("GEMINI_API_KEY")
@@ -160,6 +180,17 @@ def generate_daily_task(
     logger.info(f"Initializing Gemini API client with model '{model_name}' for Day {day} ({topic}).")
     client = genai.Client(api_key=api_key)
 
+    feedback_section = ""
+    if feedback:
+        feedback_section = f"""
+CRITICAL FIX REQUIRED (PREVIOUS ATTEMPT FAILED VALIDATION):
+The previous code generation attempt failed validation with the following error:
+{feedback}
+
+Please carefully analyze and resolve this error.
+Ensure all Python files have valid syntax (no missing quotes, unmatched parentheses, or syntax errors) and that all pytest unit tests pass cleanly.
+"""
+
     user_prompt = f"""
 Daily Learning Task Details:
 - Day Number: {day}
@@ -168,7 +199,7 @@ Daily Learning Task Details:
 - Difficulty Level: {difficulty}
 - Learning Objectives: {json.dumps(learning_objectives)}
 - Expected Output Specification: {expected_output}
-
+{feedback_section}
 Generate the implementation code and corresponding pytest unit test suite according to the JSON schema.
 Ensure file paths follow the repository convention: `learning/{category}/day_{day:03d}_<topic_slug>.py` and `tests/test_day_{day:03d}_<topic_slug>.py`.
 """
@@ -184,38 +215,60 @@ Ensure file paths follow the repository convention: `learning/{category}/day_{da
     models_to_try = [model_name] + [m for m in FALLBACK_MODELS if m != model_name]
     response = None
     last_err = None
+    MAX_RETRIES = 3
 
     for m in models_to_try:
-        try:
-            logger.info(f"Generating content with model '{m}' for Day {day} ({topic})...")
-            response = client.models.generate_content(
-                model=m,
-                contents=user_prompt,
-                config=config
-            )
-            if response and response.text:
-                logger.info(f"Successfully received response from model '{m}'.")
-                break
-        except Exception as e:
-            logger.warning(f"Model '{m}' call with structured schema failed: {e}. Trying without response_schema...")
+        logger.info(f"Attempting content generation with model '{m}' for Day {day} ({topic})...")
+        for retry in range(MAX_RETRIES):
             try:
-                fallback_config = types.GenerateContentConfig(
-                    system_instruction=SYSTEM_PROMPT,
-                    response_mime_type="application/json",
-                    automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
-                    temperature=0.2,
-                )
+                logger.info(f"Generating content with model '{m}' (attempt {retry + 1}/{MAX_RETRIES})...")
                 response = client.models.generate_content(
                     model=m,
                     contents=user_prompt,
-                    config=fallback_config
+                    config=config
                 )
                 if response and response.text:
-                    logger.info(f"Successfully received response from model '{m}' (unstructured mode).")
+                    logger.info(f"Successfully received response from model '{m}'.")
                     break
-            except Exception as e2:
-                logger.warning(f"Model '{m}' call failed: {e2}. Trying fallback...")
-                last_err = e2
+            except Exception as e:
+                last_err = e
+                if is_transient_error(e) and retry < MAX_RETRIES - 1:
+                    backoff = min(2 * (2 ** retry), 10)
+                    logger.warning(
+                        f"Model '{m}' encountered transient error: {e}. Retrying in {backoff}s ({retry + 1}/{MAX_RETRIES})..."
+                    )
+                    time.sleep(backoff)
+                    continue
+
+                logger.warning(f"Model '{m}' call with structured schema failed: {e}. Trying without response_schema...")
+                try:
+                    fallback_config = types.GenerateContentConfig(
+                        system_instruction=SYSTEM_PROMPT,
+                        response_mime_type="application/json",
+                        automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+                        temperature=0.2,
+                    )
+                    response = client.models.generate_content(
+                        model=m,
+                        contents=user_prompt,
+                        config=fallback_config
+                    )
+                    if response and response.text:
+                        logger.info(f"Successfully received response from model '{m}' (unstructured mode).")
+                        break
+                except Exception as e2:
+                    last_err = e2
+                    if is_transient_error(e2) and retry < MAX_RETRIES - 1:
+                        backoff = min(2 * (2 ** retry), 10)
+                        logger.warning(
+                            f"Model '{m}' unstructured mode encountered transient error: {e2}. Retrying in {backoff}s..."
+                        )
+                        time.sleep(backoff)
+                        continue
+                    logger.warning(f"Model '{m}' call failed: {e2}. Moving to fallback model...")
+                    break
+        if response and response.text:
+            break
 
     if not response or not response.text:
         raise RuntimeError(f"Gemini generation failed across models ({models_to_try}): {last_err}")
