@@ -64,8 +64,9 @@ def test_run_daily_automation_self_healing_retry(tmp_path):
         assert generate_mock.call_count == 2
         # Check that attempt 2 received feedback about syntax error from attempt 1
         second_call_kwargs = generate_mock.call_args_list[1].kwargs
-        assert second_call_kwargs.get("feedback") is not None
-        assert "Syntax error" in second_call_kwargs.get("feedback")
+        feedback = second_call_kwargs.get("feedback")
+        assert isinstance(feedback, str)
+        assert "Syntax error" in feedback
 
 def test_run_daily_automation_all_attempts_fail_clean_disk(tmp_path):
     repo_root = tmp_path

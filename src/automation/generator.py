@@ -1,7 +1,7 @@
 import os
 import re
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from src.automation.utils import get_repo_root, logger
 
 ALLOWED_ROOT_DIRS = {"learning", "projects", "tests"}
@@ -36,7 +36,7 @@ def sanitize_code_content(path_str: str, content: str) -> str:
 class TaskGenerator:
     """Writes generated task files to disk inside authorized directories."""
 
-    def __init__(self, repo_root: Path = None):
+    def __init__(self, repo_root: Optional[Path] = None):
         self.repo_root = repo_root or get_repo_root()
 
     def cleanup_files(self, file_paths: List[Path]) -> None:

@@ -2,14 +2,14 @@ import ast
 import subprocess
 import sys
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from src.automation.utils import get_repo_root, logger
 from src.automation.security import SecurityScanner
 
 class TaskValidator:
     """Performs multi-stage code, syntax, test, security, and diff validation."""
 
-    def __init__(self, repo_root: Path = None):
+    def __init__(self, repo_root: Optional[Path] = None):
         self.repo_root = repo_root or get_repo_root()
         self.security_scanner = SecurityScanner()
 

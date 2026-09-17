@@ -1,5 +1,6 @@
 import sys
 import argparse
+from typing import Optional
 from pathlib import Path
 from src.automation.utils import logger, get_current_day, get_repo_root
 from src.automation.roadmap import RoadmapManager
@@ -10,8 +11,8 @@ from src.automation.git import GitAutomation
 
 def run_daily_automation(
     dry_run: bool = False,
-    custom_date: str = None,
-    force_day: int = None,
+    custom_date: Optional[str] = None,
+    force_day: Optional[int] = None,
     force_run: bool = False
 ) -> int:
     """

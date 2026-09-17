@@ -8,7 +8,7 @@ from src.automation.utils import get_repo_root, logger
 class GitAutomation:
     """Safe Git wrapper for staging, committing, and conditional pushing."""
 
-    def __init__(self, repo_root: Path = None):
+    def __init__(self, repo_root: Optional[Path] = None):
         self.repo_root = repo_root or get_repo_root()
 
     def _run(self, cmd: List[str]) -> str:
