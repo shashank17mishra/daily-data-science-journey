@@ -47,6 +47,11 @@ REQUIREMENTS:
 5. All file paths must be relative to repository root.
 6. In 'content', output ONLY raw source code. NEVER include markdown code fences (```python or ```) inside the content strings.
 7. Python code must be syntactically valid with correct indentation, closed quotes/brackets, and valid imports.
+8. Pytest unit tests must be deterministic, robust, and pass cleanly on the first run.
+9. Avoid common Python traps in tests:
+   - For reference counting (`sys.getrefcount`): Note that passing an object to any function adds temporary references in the call frame. Prefer testing relative delta changes (e.g. before vs after adding a reference) or account for argument binding overhead.
+   - For garbage collection & `weakref.finalize`: NEVER pass a bound method of `self` (e.g. `self._cleanup`) to `weakref.finalize` as the callback, because bound methods strongly reference `self` and prevent garbage collection. Use static methods or module functions for finalizer callbacks. Explicitly `del` objects and call `gc.collect()` before asserting finalizer completion.
+   - Avoid timing-dependent tests or fragile sleeps.
 """
 
 
@@ -187,8 +192,10 @@ CRITICAL FIX REQUIRED (PREVIOUS ATTEMPT FAILED VALIDATION):
 The previous code generation attempt failed validation with the following error:
 {feedback}
 
-Please carefully analyze and resolve this error.
-Ensure all Python files have valid syntax (no missing quotes, unmatched parentheses, or syntax errors) and that all pytest unit tests pass cleanly.
+Please carefully analyze the exact error trace and failure messages above:
+1. If tests failed with assertion errors, fix the implementation logic or adjust invalid test assumptions.
+2. If syntax errors or missing imports occurred, ensure clean, valid Python 3 syntax.
+3. Ensure all generated code and all pytest unit tests pass completely.
 """
 
     user_prompt = f"""

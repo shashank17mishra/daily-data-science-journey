@@ -61,7 +61,12 @@ class TaskValidator:
         res = subprocess.run(cmd, cwd=str(self.repo_root), capture_output=True, text=True)
         if res.returncode != 0:
             logger.error(f"Pytest verification failed:\nSTDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}")
-            raise RuntimeError(f"Pytest verification failed with exit code {res.returncode}")
+            failure_output = res.stdout or res.stderr or ""
+            if len(failure_output) > 3000:
+                failure_output = failure_output[-3000:]
+            raise RuntimeError(
+                f"Pytest verification failed with exit code {res.returncode}:\n{failure_output.strip()}"
+            )
         
         logger.info("Pytest verification PASSED.")
 

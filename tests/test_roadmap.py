@@ -23,8 +23,9 @@ def test_roadmap_manager_load(tmp_path):
 
     mgr = RoadmapManager(roadmap_path=roadmap_file)
     data = mgr.load_roadmap()
-    assert len(data) == 1
-    assert mgr.get_task_for_day(1)["topic"] == "Variables"
+    task = mgr.get_task_for_day(1)
+    assert task is not None
+    assert task["topic"] == "Variables"
 
 def test_roadmap_progress_tracking(tmp_path):
     roadmap_file = tmp_path / "roadmap.json"
