@@ -40,13 +40,14 @@
     36,
     37,
     38,
-    39
+    39,
+    40
   ],
-  "current_day": 40,
-  "last_run": "2026-10-05T11:30:58.918482+05:30",
+  "current_day": 41,
+  "last_run": "2026-10-06T12:08:14.732346+05:30",
   "categories_completed": {
     "python": 23,
-    "dsa": 11,
+    "dsa": 12,
     "numpy": 1,
     "pandas": 2,
     "sql": 1,
